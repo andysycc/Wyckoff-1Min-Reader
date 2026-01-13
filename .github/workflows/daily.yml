@@ -2,8 +2,10 @@ name: Daily Stock AI Report (BJT 12:00 & 16:00 + Telegram
 
 on: 
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
+ schedule:
+  - cron: "0 4 * * *"   # 北京 12:00
+  - cron: "0 8 * * *"   # 北京 16:00
+
 
 permissions:
   contents: write

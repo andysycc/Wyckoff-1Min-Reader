@@ -30,20 +30,18 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # 安装 requests 用于 Gemini HTTP 调用，安装 openai 用于官方调用
           pip install pandas akshare mplfinance openai requests
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run Analysis Script
         env:
-          # === 1. Google Gemini 配置 (首选) ===
+          # === 1. Google Gemini 配置 (指定 gemini-3-flash-preview) ===
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: "gemini-1.5-flash" 
+          GEMINI_MODEL: "gemini-3-flash-preview"
           
           # === 2. 官方 OpenAI 配置 (备用) ===
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          AI_MODEL: "gpt-4o" # 指定官方模型
-          # 注意：这里删除了 OPENAI_BASE_URL，默认连接官方接口
+          AI_MODEL: "gpt-4o"
           
           # === 3. 通用配置 ===
           WYCKOFF_PROMPT_TEMPLATE: ${{ secrets.WYCKOFF_PROMPT_TEMPLATE }}
@@ -83,20 +81,17 @@ jobs:
           set -euo pipefail
           export LANG=C.UTF-8
           
-          # 查找最新文件
           REPORT_FILE=$(find reports -name "*.md" -type f -printf "%T@ %p\n" | sort -n | tail -1 | cut -d' ' -f2-)
           CHART_FILE=$(find reports -name "*.png" -type f -printf "%T@ %p\n" | sort -n | tail -1 | cut -d' ' -f2-)
 
           if [ -z "${REPORT_FILE:-}" ]; then echo "No report found."; exit 0; fi
 
-          # 图片处理
           HAS_IMAGE=false
           if [ -n "${CHART_FILE:-}" ] && [ -f "$CHART_FILE" ]; then
              cp "$CHART_FILE" /tmp/chart.png
              HAS_IMAGE=true
           fi
 
-          # 摘要生成
           python - "$REPORT_FILE" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" <<'PY' > /tmp/caption.txt
           import pathlib, sys
           path, server, repo = sys.argv[1], sys.argv[2], sys.argv[3]

@@ -81,35 +81,71 @@ jobs:
           set -euo pipefail
           export LANG=C.UTF-8
           
+          echo "=== 1. 查找最新报告 ==="
+          # 查找最新的 md 文件 (处理文件名空格问题)
           REPORT_FILE=$(find reports -name "*.md" -type f -printf "%T@ %p\n" | sort -n | tail -1 | cut -d' ' -f2-)
+          
+          # 查找最新的 png 文件
           CHART_FILE=$(find reports -name "*.png" -type f -printf "%T@ %p\n" | sort -n | tail -1 | cut -d' ' -f2-)
 
-          if [ -z "${REPORT_FILE:-}" ]; then echo "No report found."; exit 0; fi
+          if [ ! -f "$REPORT_FILE" ]; then 
+            echo "::warning::没有找到报告文件，跳过通知。"
+            exit 0
+          fi
+          
+          echo "Found Report: $REPORT_FILE"
 
+          # === 2. 准备图片 ===
           HAS_IMAGE=false
           if [ -n "${CHART_FILE:-}" ] && [ -f "$CHART_FILE" ]; then
+             echo "Found Chart: $CHART_FILE"
+             # 确保使用绝对路径复制
              cp "$CHART_FILE" /tmp/chart.png
              HAS_IMAGE=true
+          else
+             echo "No chart image found."
           fi
 
+          # === 3. 准备文案 (保存到文件，避免 Shell 转义错误) ===
           python - "$REPORT_FILE" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" <<'PY' > /tmp/caption.txt
           import pathlib, sys
           path, server, repo = sys.argv[1], sys.argv[2], sys.argv[3]
           try:
               text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
               lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+              
+              # 提取标题
               title = lines[0].lstrip("#").strip() if lines else "AI Analysis"
-              summary = "\n".join(lines[2:40])[:900]
-              print(f"<b>{title}</b>\n\n{summary}\n\n... <a href='{server}/{repo}'>查看完整版</a>")
-          except: print("Error parsing report")
+              
+              # 提取正文 (截取前 900 字符防止超长)
+              # 跳过前两行(通常是标题和图片链接)
+              body_lines = lines[2:40]
+              summary = "\n".join(body_lines)[:900]
+              
+              # 生成 HTML 格式消息
+              msg = f"<b>{title}</b>\n\n{summary}\n\n... <a href='{server}/{repo}'>查看完整版</a>"
+              print(msg)
+          except Exception as e:
+              print(f"Error parsing report: {e}")
           PY
           
-          CAPTION_TEXT=$(cat /tmp/caption.txt)
+          echo "Caption saved to /tmp/caption.txt"
 
+          # === 4. 发送请求 (使用文件的形式传参，修复 exit code 26) ===
           if [ "$HAS_IMAGE" = true ]; then
+            echo "Sending Photo..."
+            # 注意: caption=</tmp/caption.txt 表示让 curl 直接读取文件内容作为字段值
+            # 这样可以完美避开所有引号、换行符导致的 Shell 错误
             curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendPhoto" \
-              -F "chat_id=${TG_CHAT_ID}" -F "photo=@/tmp/chart.png" -F "parse_mode=HTML" -F "caption=${CAPTION_TEXT}"
+              -F "chat_id=${TG_CHAT_ID}" \
+              -F "photo=@/tmp/chart.png" \
+              -F "parse_mode=HTML" \
+              -F "caption=</tmp/caption.txt"
           else
+            echo "Sending Text..."
+            # 对于纯文本消息，我们也读取文件内容发送
             curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-              -d "chat_id=${TG_CHAT_ID}" -d "parse_mode=HTML" --data-urlencode "text=${CAPTION_TEXT}"
+              -d "chat_id=${TG_CHAT_ID}" \
+              -d "parse_mode=HTML" \
+              --data-urlencode "text=$(cat /tmp/caption.txt)"
           fi
